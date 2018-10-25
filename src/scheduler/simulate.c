@@ -537,7 +537,6 @@ int
 perform_event(status *policy, timed_event *event)
 {
 	char logbuf[MAX_LOG_SIZE];
-	char logbuf2[MAX_LOG_SIZE];
 	char timebuf[128];
 	resource_resv *resresv;
 	int ret = 1;
@@ -592,9 +591,12 @@ perform_event(status *policy, timed_event *event)
 		event->event_func(event->event_ptr, event->event_func_arg);
 
 	if (ret) {
-		snprintf(logbuf2, MAX_LOG_SIZE, "Simulation: %s [%s]", logbuf, timebuf);
+		char *msgbuf;
+
+		pbs_asprintf(&msgbuf, "Simulation: %s [%s]", logbuf, timebuf);
 		schdlog(PBSEVENT_DEBUG3, PBS_EVENTCLASS_JOB, LOG_DEBUG,
-			event->name, logbuf2);
+			event->name, msgbuf);
+		free(msgbuf);
 	}
 	return ret;
 }
@@ -1772,7 +1774,7 @@ simulate_resmin(schd_resource *reslist, time_t end, event_list *calendar,
 		te != NULL && (end == 0 || te->event_time < end);
 		te = find_next_timed_event(te, IGNORE_DISABLED_EVENTS, event_mask)) {
 		resresv = (resource_resv *) te->event_ptr;
-		if (incl_arr == NULL || find_resource_resv_by_rank(incl_arr, resresv->rank) !=NULL) {
+		if (incl_arr == NULL || find_resource_resv_by_indrank(incl_arr, resresv->rank, -1) !=NULL) {
 			if (resresv != exclude) {
 				req = resresv->resreq;
 

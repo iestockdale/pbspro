@@ -263,7 +263,7 @@ update_cycle_status(struct status *policy, time_t current_time)
 	enum prime_time prime;		/* current prime time status */
 	struct tm *ptm;
 	char logbuf[MAX_LOG_SIZE];
-	char logbuf2[MAX_LOG_SIZE];
+	char logbuf2[MAX_LOG_SIZE / 2];
 	struct tm *tmptr;
 
 	if (policy == NULL)
@@ -1897,7 +1897,7 @@ add_job_to_calendar(int pbs_sd, status *policy, server_info *sinfo,
 	if ((nsinfo = dup_server_info(sinfo)) == NULL)
 		return 0;
 
-	if ((njob = find_resource_resv_by_rank(nsinfo->jobs, topjob->rank)) == NULL) {
+	if ((njob = find_resource_resv_by_indrank(nsinfo->jobs, topjob->rank, topjob->resresv_ind)) == NULL) {
 		free_server(nsinfo, 1);
 		return 0;
 	}

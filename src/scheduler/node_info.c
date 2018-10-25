@@ -1485,8 +1485,8 @@ collect_jobs_on_nodes(node_info **ninfo_arr, resource_resv **resresv_arr, int si
 					 * it'll show up more then once.  If this is the case, we only
 					 * want to have the job in our array once.
 					 */
-					if (find_resource_resv_by_rank(ninfo_arr[i]->job_arr,
-						job->rank) == NULL) {
+					if (find_resource_resv_by_indrank(ninfo_arr[i]->job_arr,
+						job->rank, -1) == NULL) {
 						if (ninfo_arr[i]->has_hard_limit) {
 						cts = find_alloc_counts(ninfo_arr[i]->group_counts,
 							job->group);
@@ -1600,7 +1600,7 @@ update_node_on_run(nspec *ns, resource_resv *resresv, char *job_state)
 
 	if (resresv->is_job) {
 		ninfo->num_jobs++;
-		if (find_resource_resv_by_rank(ninfo->job_arr, resresv->rank) ==NULL) {
+		if (find_resource_resv_by_indrank(ninfo->job_arr, resresv->rank, resresv->resresv_ind) == NULL) {
 			tmp_arr = add_resresv_to_array(ninfo->job_arr, resresv);
 			if (tmp_arr == NULL)
 				return;
@@ -1611,7 +1611,7 @@ update_node_on_run(nspec *ns, resource_resv *resresv, char *job_state)
 	}
 	else if (resresv->is_resv) {
 		ninfo->num_run_resv++;
-		if (find_resource_resv_by_rank(ninfo->run_resvs_arr, resresv->rank) ==NULL) {
+		if (find_resource_resv_by_indrank(ninfo->run_resvs_arr, resresv->rank, resresv->resresv_ind) == NULL) {
 			tmp_arr = add_resresv_to_array(ninfo->run_resvs_arr, resresv);
 			if (tmp_arr == NULL)
 				return;
@@ -2294,11 +2294,14 @@ eval_selspec(status *policy, selspec *spec, place *placespec,
 			}
 		}
 		else {
+			char *msgbuf;
+
 			translate_fail_code(err, NULL, reason);
-			snprintf(logbuf, MAX_LOG_SIZE,
-				"Placement set %s is too small: %s", nodepart[i]->name, reason);
+			pbs_asprintf(&msgbuf, "Placement set %s is too small: %s",
+				nodepart[i]->name, reason);
 			schdlog(PBSEVENT_DEBUG3, PBS_EVENTCLASS_JOB, LOG_DEBUG,
-				resresv->name, logbuf);
+				resresv->name, msgbuf);
+			free(msgbuf);
 			set_schd_error_codes(err, NOT_RUN, SET_TOO_SMALL);
 			set_schd_error_arg(err, ARG1, "Placement");
 #ifdef NAS /* localmod 031 */
@@ -2382,6 +2385,7 @@ eval_placement(status *policy, selspec *spec, node_info **ninfo_arr, place *pl,
 	nspec			**ns_head = NULL;
 	char			logbuf[MAX_LOG_SIZE] = {0};
 	char			reason[MAX_LOG_SIZE] = {0};
+	char			*msgbuf;
 	resource_req		*req = NULL;
 	schd_resource		*res = NULL;
 	selspec			*dselspec = NULL;
@@ -2562,10 +2566,12 @@ eval_placement(status *policy, selspec *spec, node_info **ninfo_arr, place *pl,
 						else
 							translate_fail_code(err, NULL, reason);
 
-						snprintf(logbuf, MAX_LOG_SIZE,
-							"Insufficient host-level resources %s", reason);
+						pbs_asprintf(&msgbuf,
+							"Insufficient host-level resources %s",
+							reason);
 						schdlog(PBSEVENT_DEBUG3, PBS_EVENTCLASS_JOB, LOG_DEBUG,
-							resresv->name, logbuf);
+							resresv->name, msgbuf);
+						free(msgbuf);
 						if (failerr->status_code == SCHD_UNKWN)
 							move_schd_error(failerr, err);
 						clear_schd_error(err);
@@ -2624,17 +2630,19 @@ eval_placement(status *policy, selspec *spec, node_info **ninfo_arr, place *pl,
 						}
 					}
 					else {
-						if (hostsets[i]->free_nodes ==0) {
+						if (hostsets[i]->free_nodes == 0) {
 							strncpy(reason, "No free nodes available", MAX_LOG_SIZE - 1);
 							reason[MAX_LOG_SIZE - 1] = '\0';
 						}
 						else
 							translate_fail_code(err, NULL, reason);
 
-						snprintf(logbuf, MAX_LOG_SIZE,
-							"Insufficient host-level resources %s", reason);
+						pbs_asprintf(&msgbuf,
+							"Insufficient host-level resources %s",
+							reason);
 						schdlog(PBSEVENT_DEBUG3, PBS_EVENTCLASS_JOB, LOG_DEBUG,
-							resresv->name, logbuf);
+							resresv->name, msgbuf);
+						free(msgbuf);
 
 						if (failerr->status_code == SCHD_UNKWN)
 							move_schd_error(failerr, err);
@@ -2745,10 +2753,12 @@ eval_placement(status *policy, selspec *spec, node_info **ninfo_arr, place *pl,
 						else
 							translate_fail_code(err, NULL, reason);
 
-						snprintf(logbuf, MAX_LOG_SIZE,
-							"Insufficient host-level resources %s", reason);
+						pbs_asprintf(&msgbuf,
+							"Insufficient host-level resources %s",
+							reason);
 						schdlog(PBSEVENT_DEBUG3, PBS_EVENTCLASS_JOB, LOG_DEBUG,
-							resresv->name, logbuf);
+							resresv->name, msgbuf);
+						free(msgbuf);
 #ifdef NAS /* localmod 998 */
 						set_schd_error_codes(err, NOT_RUN, RESOURCES_INSUFFICIENT);
 #else
@@ -2855,7 +2865,7 @@ eval_complex_selspec(status *policy, selspec *spec, node_info **ninfo_arr, place
 	 * through our nodes and will possibly come up with a solution... but
 	 * there is always the chance we could swap out nodes depending on one
 	 * node being able to satisfy multiple simple specs.
-	 * This resursion could take very long to finish.
+	 * This recursion could take very long to finish.
 	 *
 	 * We'll go through the nodes once since it'll probably be fine for most
 	 * cases.
@@ -3596,7 +3606,11 @@ resources_avail_on_vnode(resource_req *specreq_cons, node_info *node,
 					} else if (is_p == PROVISIONING_NEEDED ) {
 						if (ns != NULL)
 							ns->go_provision = 1;
-						if (resresv->select->total_chunks >1)
+						/* Do not set current aoe/eoe on the node when placement is scatter/vscatter
+						 * because in case of scatter/vscatter placement we are not working on duplicate
+						 * copy of nodes.
+						 */
+						if (resresv->select->total_chunks > 1 && pl->scatter != 1 && pl->vscatter != 1)
 							set_current_aoe(node, resresv->aoename);
 						if (resresv->is_job) {
 							sprintf(logbuf, "Vnode %s selected for provisioning with AOE %s",
@@ -3613,7 +3627,7 @@ resources_avail_on_vnode(resource_req *specreq_cons, node_info *node,
 						break;
 					}
 					else if (is_p == PROVISIONING_NEEDED) {
-						if (resresv->select->total_chunks > 1)
+						if (resresv->select->total_chunks > 1 && pl->scatter != 1 && pl->vscatter != 1)
 							set_current_eoe(node, resresv->eoename);
 
 						if (resresv->is_job) {
@@ -3692,7 +3706,7 @@ resources_avail_on_vnode(resource_req *specreq_cons, node_info *node,
 			else if (is_p == PROVISIONING_NEEDED) {
 				if (ns != NULL)
 					ns->go_provision = 1;
-				if (resresv->select->total_chunks >1) {
+				if (resresv->select->total_chunks > 1 && pl->scatter != 1 && pl->vscatter != 1) {
 					set_current_aoe(node, resresv->aoename);
 				}
 			}
@@ -3701,7 +3715,7 @@ resources_avail_on_vnode(resource_req *specreq_cons, node_info *node,
 			if (is_p == NOT_PROVISIONABLE)
 				return 0;
 			else if (is_p == PROVISIONING_NEEDED) {
-				if (resresv->select->total_chunks > 1) {
+				if (resresv->select->total_chunks > 1 && pl->scatter != 1 && pl->vscatter != 1) {
 					set_current_eoe(node, resresv->eoename);
 				}
 			}

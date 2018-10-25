@@ -461,7 +461,8 @@ post_doq(struct work_task *pwt)
 					destin = strchr(ppjob->ji_qs.ji_destin, (int)'@');
 					if (destin != NULL) {
 						strncpy(pparent.dc_child, ppjob->ji_qs.ji_jobid, sizeof(pparent.dc_child));
-						strncpy(pparent.dc_svr, destin+1, sizeof(pparent.dc_svr));
+						destin++;
+						strncpy(pparent.dc_svr, destin, sizeof(pparent.dc_svr) - (destin - ppjob->ji_qs.ji_destin));
 						rc = send_depend_req(pjob, &pparent, preq->rq_ind.rq_register.rq_dependtype,
 							JOB_DEPEND_OP_REGISTER,
 							SYNC_SCHED_HINT_NULL, post_doq);
@@ -678,7 +679,7 @@ depend_on_exec(job *pjob)
 /**
  * @brief
  * 		depend_on_term - Perform actions if job has "afterany, afterok, afternotok"
- *		dependencies, send "register-release" or register-delete" as
+ *		dependencies, send "register-release" or "register-delete" as
  *		appropriate.
  * @par
  *		This function is invoked from on_job_exit() in req_jobobit.c.

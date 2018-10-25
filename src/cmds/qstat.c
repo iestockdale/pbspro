@@ -392,7 +392,7 @@ prt_attr(char *name, char *resource, char *value, int one_line) {
 	switch (output_format) {
 	case FORMAT_JSON:
 		if (strcmp(name, ATTR_v) == 0) {
-			if (add_json_node(JSON_OBJECT, JSON_NULL, name, NULL) == NULL)
+			if (add_json_node(JSON_OBJECT, JSON_NULL, JSON_NOVALUE, name, NULL) == NULL)
 				exit_qstat("out of memory");
 			buf = strdup(value);
 			temp = buf;
@@ -415,39 +415,39 @@ prt_attr(char *name, char *resource, char *value, int one_line) {
 					*buf++ = *value++;
 				}
 				*buf = '\0';
-				if (add_json_node(JSON_VALUE, JSON_NULL, key, val) == NULL)
+				if (add_json_node(JSON_VALUE, JSON_NULL, JSON_ESCAPE, key, val) == NULL)
 					exit_qstat("out of memory");
 				if (*value != '\0')
 					value++;
 			}
-			if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL, NULL) == NULL)
+			if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL, NULL) == NULL)
 				exit_qstat("out of memory");
 			free(temp);
 		} else {
 			if (resource) {
 				if (prev_resc_name && strcmp(prev_resc_name, name) != 0) {
-					if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL, NULL)
+					if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL, NULL)
 							== NULL)
 						exit_qstat("out of memory");
 					prev_resc_name = NULL;
 				}
 				if (prev_resc_name == NULL || strcmp(prev_resc_name, name) != 0) {
-					if (add_json_node(JSON_OBJECT, JSON_NULL, name, NULL)
+					if (add_json_node(JSON_OBJECT, JSON_NULL, JSON_NOVALUE, name, NULL)
 							== NULL)
 						exit_qstat("out of memory");
 					prev_resc_name = name;
 				}
-				if (add_json_node(JSON_VALUE, JSON_NULL, resource, value)
+				if (add_json_node(JSON_VALUE, JSON_NULL, JSON_ESCAPE, resource, value)
 						== NULL)
 					exit_qstat("out of memory");
 			} else {
 				if (prev_resc_name) {
-					if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL, NULL)
+					if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL, NULL)
 							== NULL)
 						exit_qstat("out of memory");
 					prev_resc_name = NULL;
 				}
-				if (add_json_node(JSON_VALUE, JSON_NULL, name, value) == NULL)
+				if (add_json_node(JSON_VALUE, JSON_NULL, JSON_ESCAPE, name, value) == NULL)
 					exit_qstat("out of memory");
 			}
 		}
@@ -833,7 +833,7 @@ altdsp_statjob(struct batch_status *pstat, struct batch_status *prtheader, int a
 						tasks = pat->value;
 				} else if (strcmp(pat->resource, "mem") == 0) {
 					(void)strncpy(rqmem,
-						cnv_size(pat->value, alt_opt), SIZEL);
+						cnv_size(pat->value, alt_opt), sizeof(rqmem) - 1);
 				} else if (strcmp(pat->resource, "walltime") == 0) {
 					rqtimewal = pat->value;
 				} else if (strcmp(pat->resource, "cput") == 0) {
@@ -841,13 +841,13 @@ altdsp_statjob(struct batch_status *pstat, struct batch_status *prtheader, int a
 					usecput = 1;
 				} else if (strcmp(pat->resource, "srfs_big") == 0) {
 					(void)strncpy(srfsbig,
-						cnv_size(pat->value, alt_opt), SIZEL-1);
+						cnv_size(pat->value, alt_opt), sizeof(srfsbig) - 1);
 				} else if (strcmp(pat->resource, "srfs_fast") == 0) {
 					(void)strncpy(srfsfast,
-						cnv_size(pat->value, alt_opt), SIZEL-1);
+						cnv_size(pat->value, alt_opt), sizeof(srfsfast) - 1);
 				} else if (strcmp(pat->resource, "piofs") == 0) {
 					(void)strncpy(pfs,
-						cnv_size(pat->value, alt_opt), SIZEL-1);
+						cnv_size(pat->value, alt_opt), sizeof(pfs) - 1);
 				}
 
 			} else if (strcmp(pat->name, ATTR_exechost) == 0) {
@@ -996,7 +996,7 @@ altdsp_statque(char *serv, struct batch_status *pstat, int opt)
 
 	while (pstat) {
 		/* *rmem = '\0'; */
-		(void)strncpy(rmem, "--  ", SIZEL-1);
+		(void)strncpy(rmem, "--  ", sizeof(rmem) - 1);
 		cput  = blank;
 		wallt = blank;
 		nodect= "-- ";
@@ -1025,7 +1025,7 @@ altdsp_statque(char *serv, struct batch_status *pstat, int opt)
 			} else if (strcmp(pat->name, ATTR_rescmax) == 0) {
 				if (strcmp(pat->resource, "mem") == 0) {
 					(void)strncpy(rmem,
-						cnv_size(pat->value, opt), SIZEL);
+						cnv_size(pat->value, opt), sizeof(rmem) - 1);
 				} else if (strcmp(pat->resource, "cput") == 0) {
 					cput = pat->value;
 				} else if (strcmp(pat->resource, "walltime")==0) {
@@ -1098,17 +1098,13 @@ cvt_time_to_seconds(char *ts)
  *	3.  walltime_used / walltime_requested if walltime specified, or
  *	4.  "--" if none of the above apply
  */
-static char *
+char *
 percent_cal(char *state, char *timeu, char *timer, char *wtimu, char *wtimr, char *arsct)
 {
-	static char rtn[TIMEUL+1];
+	char *rtn = NULL;
 	long bot = 0;
 	long top = 0;
-	long perccpu = -1;
-	long percwal = -1;
-	int	qu, ru, ex, ep;
-
-	strcpy(rtn, "-- ");
+	int qu, ru, ex, ep;
 
 	switch (*state) {
 
@@ -1123,28 +1119,37 @@ percent_cal(char *state, char *timeu, char *timer, char *wtimu, char *wtimr, cha
 
 
 	if (arsct) {			/* array job: percent expired */
+		long percexp = -1;
 		sscanf(arsct, "Queued:%d Running:%d Exiting:%d Expired:%d", &qu, &ru, &ex, &ep);
 		bot = qu + ru + ex + ep;
 		top = ep;
 		if (bot != 0)
-			sprintf(rtn, "%3ld ", (top * 100)/bot);
+			percexp = (top * 100) / bot;
+		if ((percexp >= 0) && (percexp < 1000)) {
+			pbs_asprintf(&rtn, "%3ld ", percexp);
+		}
 	} else {
+		long perccpu = -1;
+		long percwal = -1;
 		if (timer && timeu) {	/* if cput specified */
 			top = cvt_time_to_seconds(timeu);
 			bot = cvt_time_to_seconds(timer);
 			if (bot != 0)
-				perccpu = (top * 100)/bot;
+				perccpu = (top * 100) / bot;
 		}
 		if (wtimr && wtimu) {	/* if walltime specified */
 			top = cvt_time_to_seconds(wtimu);
 			bot = cvt_time_to_seconds(wtimr);
 			if (bot != 0)
-				percwal = (top * 100)/bot;
+				percwal = (top * 100) / bot;
 		}
 		if ((perccpu != -1) || (percwal != -1)) {
-			sprintf(rtn, "%3ld ",
+			pbs_asprintf(&rtn, "%3ld ",
 				perccpu > percwal ? perccpu : percwal);
 		}
+	}
+	if (rtn == NULL) {
+		pbs_asprintf(&rtn, "%3s", "-- ");
 	}
 	return (rtn);
 }
@@ -1195,7 +1200,7 @@ display_statjob(struct batch_status *status, struct batch_status *prtheader, int
 	}
 
 	if(output_format == FORMAT_JSON && first_stat) {
-		if (add_json_node(JSON_OBJECT, JSON_NULL, "Jobs", NULL) == NULL)
+		if (add_json_node(JSON_OBJECT, JSON_NULL, JSON_FULLESCAPE, "Jobs", NULL) == NULL)
 			return 1;
 		first_stat = 0;
 	}
@@ -1216,7 +1221,7 @@ display_statjob(struct batch_status *status, struct batch_status *prtheader, int
 			if (output_format == FORMAT_DSV || output_format == FORMAT_DEFAULT)
 				printf("Job Id: %s%s", p->name, delimiter);
 			else if (output_format == FORMAT_JSON)
-				if (add_json_node(JSON_OBJECT, JSON_NULL, p->name, NULL) == NULL)
+				if (add_json_node(JSON_OBJECT, JSON_NULL, JSON_NOVALUE, p->name, NULL) == NULL)
 					return 1;
 			a = p->attribs;
 			while (a != NULL) {
@@ -1281,10 +1286,10 @@ display_statjob(struct batch_status *status, struct batch_status *prtheader, int
 					printf("%s", delimiter);
 				else if (output_format == FORMAT_JSON) {
 					if (prev_resc_name != NULL)
-						if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL,
+						if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL,
 								NULL) == NULL)
 							return 1;
-					if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL, NULL)
+					if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL, NULL)
 							== NULL)
 						return 1;
 				}
@@ -1381,7 +1386,9 @@ display_statjob(struct batch_status *status, struct batch_status *prtheader, int
 			}
 			if (timeu == NULL) timeu = "0";
 			if (p_opt) {
-				printf(format, jid, name, owner, percent_cal(state, timeu, timer, wtimu, wtimr, arsct), state, location);
+				char *pc = percent_cal(state, timeu, timer, wtimu, wtimr, arsct);
+				printf(format, jid, name, owner, pc, state, location);
+				free(pc);
 			} else
 				printf(format, jid, name, owner, timeu, state, location);
 		}
@@ -1441,7 +1448,7 @@ display_statque(struct batch_status *status, int prtheader, int full, int alt_op
 	}
 
 	if (output_format == FORMAT_JSON && first_stat) {
-		if (add_json_node(JSON_OBJECT, JSON_NULL, "Queue", NULL) == NULL)
+		if (add_json_node(JSON_OBJECT, JSON_NULL, JSON_FULLESCAPE, "Queue", NULL) == NULL)
 			return 1;
 		first_stat = 0;
 	}
@@ -1464,10 +1471,10 @@ display_statque(struct batch_status *status, int prtheader, int full, int alt_op
 				printf("Queue: %s%s", p->name, delimiter);
 			else if (output_format == FORMAT_JSON) {
 				if (prev_resc_name != NULL)
-					if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL, NULL)
+					if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL, NULL)
 							== NULL)
 						return 1;
-				if (add_json_node(JSON_OBJECT, JSON_NULL, p->name, NULL)
+				if (add_json_node(JSON_OBJECT, JSON_NULL, JSON_NOVALUE, p->name, NULL)
 						== NULL)
 					return 1;
 			}
@@ -1481,7 +1488,7 @@ display_statque(struct batch_status *status, int prtheader, int full, int alt_op
 				if ((a || output_format == FORMAT_DEFAULT))
 					printf("%s", delimiter);
 				else if (output_format == FORMAT_JSON)
-					if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL, NULL)
+					if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL, NULL)
 							== NULL)
 						return 1;
 			}
@@ -1590,7 +1597,7 @@ display_statserver(struct batch_status *status, int prtheader, int full, int alt
 	}
 
 	if(output_format == FORMAT_JSON && first_stat) {
-		if (add_json_node(JSON_OBJECT, JSON_NULL, "Server", NULL) == NULL)
+		if (add_json_node(JSON_OBJECT, JSON_NULL, JSON_NOVALUE, "Server", NULL) == NULL)
 			return 1;
 		first_stat = 0;
 	}
@@ -1610,7 +1617,7 @@ display_statserver(struct batch_status *status, int prtheader, int full, int alt
 			if (output_format == FORMAT_DSV || output_format == FORMAT_DEFAULT)
 				printf("Server: %s%s", p->name, delimiter);
 			else if (output_format == FORMAT_JSON)
-				if (add_json_node(JSON_OBJECT, JSON_NULL, p->name, NULL)
+				if (add_json_node(JSON_OBJECT, JSON_NULL, JSON_NOVALUE, p->name, NULL)
 						== NULL)
 					return 1;
 			a = p->attribs;
@@ -1623,10 +1630,10 @@ display_statserver(struct batch_status *status, int prtheader, int full, int alt
 					printf("%s", delimiter);
 				else if (output_format == FORMAT_JSON) {
 					if (prev_resc_name != NULL)
-						if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL,
+						if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL,
 								NULL) == NULL)
 							return 1;
-					if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL, NULL)
+					if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL, NULL)
 							== NULL)
 						return 1;
 				}
@@ -2547,11 +2554,11 @@ qstat -B [-f] [-F format] [-D delim] [ server_name... ]\n";
 		delimiter = "";
 		/* adding prologue to json output. */
 		timenow = time(0);
-		if (add_json_node(JSON_VALUE, JSON_INT, "timestamp", &timenow) == NULL)
+		if (add_json_node(JSON_VALUE, JSON_INT, JSON_FULLESCAPE, "timestamp", &timenow) == NULL)
 			exit_qstat("out of memory");
-		if (add_json_node(JSON_VALUE, JSON_STRING, "pbs_version", pbs_version) == NULL)
+		if (add_json_node(JSON_VALUE, JSON_STRING, JSON_FULLESCAPE, "pbs_version", pbs_version) == NULL)
 			exit_qstat("out of memory");
-		if (add_json_node(JSON_VALUE, JSON_STRING, "pbs_server", def_server) == NULL)
+		if (add_json_node(JSON_VALUE, JSON_STRING, JSON_FULLESCAPE, "pbs_server", def_server) == NULL)
 			exit_qstat("out of memory");
 	}
 
@@ -2952,7 +2959,7 @@ svr_no_args:
 		} /* switch */
 	}
 	if(output_format == FORMAT_JSON) {
-		if (add_json_node(JSON_OBJECT_END, JSON_NULL, NULL, NULL) == NULL)
+		if (add_json_node(JSON_OBJECT_END, JSON_NULL, JSON_NOVALUE, NULL, NULL) == NULL)
 			exit_qstat("out of memory");
 		generate_json(stdout);
 		free_json_node();

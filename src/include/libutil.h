@@ -194,6 +194,11 @@ char *pbs_fgets(char **pbuf, int *pbuf_size, FILE *fp);
 char *pbs_fgets_extend(char **pbuf, int *pbuf_size, FILE *fp);
 
 /*
+ * Internal asprintf() implementation for use on all platforms
+ */
+int pbs_asprintf(char **dest, const char *fmt, ...);
+
+/*
  * calculate the number of digits to the right of the decimal point in
  *        a floating point number.  This can be used in conjunction with
  *        printf() to not print trailing zeros.
@@ -262,6 +267,10 @@ void free_string_array(char **arr);
  */
 char * escape_delimiter(char *str, char *delim, char esc);
 
+#ifdef HAVE_MALLOC_INFO
+char * get_mem_info(void);
+#endif
+
 /* Size of time buffer */
 #define TIMEBUF_SIZE 128
 
@@ -271,7 +280,6 @@ char * escape_delimiter(char *str, char *delim, char esc);
  *
  */
 void convert_duration_to_str(time_t duration, char* buf, int bufsize);
-
 
 #ifdef  __cplusplus
 }

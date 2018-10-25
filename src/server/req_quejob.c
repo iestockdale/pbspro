@@ -297,23 +297,19 @@ req_quejob(struct batch_request *preq)
 	int              set_project = 0;
 	int		 i;
 	attribute	 tempattr;
-	char		 buf[256];
 	char		 jidbuf[PBS_MAXSVRJOBID+1];
 	pbs_queue	*pque;
 	char		*qname;
 	char            *result;
-	int              l;
 	resource_def	*prdefnod;
 	resource_def	*prdefsel;
 	resource_def	*prdefplc;
-	resource_def	*prdefbad;
 	resource	*presc;
 	conn_t		*conn;
 	attribute       temp_attr;
 #else
 	mom_hook_input_t  hook_input;
 	mom_hook_output_t hook_output;
-	char		basename[MAXPATHLEN+1];
 	int		hook_errcode = 0;
 	int		hook_rc = 0;
 	char		hook_buf[HOOK_MSG_SIZE];
@@ -571,6 +567,8 @@ req_quejob(struct batch_request *preq)
 		/* unlink job from svr_alljobs since will be place on newjobs */
 		delete_link(&pj->ji_alljobs);
 	} else {
+		char basename[MAXPATHLEN + 1];
+
 		/* if not already here, allocate job struct */
 
 		if ((pj = job_alloc()) == NULL) {
@@ -739,6 +737,8 @@ req_quejob(struct batch_request *preq)
 	 */
 
 	if (created_here) {	/* created here */
+		int l;
+		char buf[256];
 
 		/* check that job has a jobname */
 
@@ -753,6 +753,7 @@ req_quejob(struct batch_request *preq)
 
 		if (pj->ji_wattr[(int)JOB_ATR_resource].at_flags & ATR_VFLAG_SET) {
 			int have_selectplace = 0;
+			resource_def *prdefbad;
 
 			presc = (resource *)GET_NEXT(pj->ji_wattr[(int)JOB_ATR_resource].at_val.at_list);
 
@@ -1167,13 +1168,13 @@ req_quejob(struct batch_request *preq)
 				/* piggy back the hook_name in the message */
 				/* to be stripped out by the server upon */
 				/* processing hook fail_action */
-				snprintf(hook_msg, sizeof(hook_msg),
-					"%s,%s",
-					last_phook?last_phook->hook_name:"",
-					(hook_rc == 0)?hook_buf:"internal error");
+				snprintf(hook_msg, sizeof(hook_msg), "%s,%.*s",
+					last_phook ? last_phook->hook_name : "",
+					(int)(sizeof(hook_msg) - (last_phook ? strlen(last_phook->hook_name) : 0) - 2),
+					(hook_rc == 0) ? hook_buf : "internal error");
 			} else {
-				snprintf(hook_msg, sizeof(hook_msg),
-					",%s", hook_buf);
+				snprintf(hook_msg, sizeof(hook_msg), ",%.*s",
+					(int)(sizeof(hook_msg) - 2), hook_buf);
 			}
 
 			reply_text(preq, hook_errcode, hook_msg);
@@ -2010,7 +2011,6 @@ req_mvjobfile(struct batch_request *preq)
 	job	*pj;
 #ifndef WIN32
 	mode_t	 cur_mask;
-	char	 ntmpbuf[MAXPATHLEN+1];
 	struct stat sb;
 #endif
 
@@ -2063,9 +2063,13 @@ req_mvjobfile(struct batch_request *preq)
 		}
 	}
 	if (preq->rq_ind.rq_jobfile.rq_sequence == 0) {
+		char ntmpbuf[MAXPATHLEN+1];
+
 		/* receiving first piece, so create new file securely */
 		/* will discard any existing file (via rename)	      */
-		strncpy(ntmpbuf, namebuf, MAXPATHLEN-6);
+		snprintf(ntmpbuf, sizeof(ntmpbuf), "%s", namebuf);
+		if (strlen(ntmpbuf) > (sizeof(ntmpbuf) - 8))
+			ntmpbuf[sizeof(ntmpbuf) - 8] = '\0';
 		strcat(ntmpbuf, "XXXXXX");	/* template for mkstemp() */
 		cur_mask = umask(077);		/* force to create -rw------ */
 		fds = mkstemp(ntmpbuf);
@@ -2567,21 +2571,22 @@ locate_new_job(struct batch_request *preq, char *jobid)
 void
 req_resvSub(struct batch_request *preq)
 {
-	char		 buf[256];
-	char		 buf1[PBS_MAXUSER+ PBS_MAXHOSTNAME + 2] = {0};
+	/*
+	 * buf and buf1 are used to hold user@hostname stings together
+	 * with a small amount (less than 64 characters) of text.
+	 */
+	char		 buf[PBS_MAXUSER + PBS_MAXHOSTNAME + 64];
+	char		 buf1[PBS_MAXUSER + PBS_MAXHOSTNAME + 64] = {0};
 	int		 created_here = 0;
 	int		 i = 0;
-	int		 index = 0;
 	char		*rid = NULL;
 	char		 ridbuf[PBS_MAXSVRRESVID+1] = {0};
-	char		 namebuf[MAXPATHLEN+1] = {0};
 	char		 qbuf[PBS_MAXSVRRESVID+1] = {0};
 	char		*pc = NULL;
 	attribute_def	*pdef = NULL;
 	resc_resv	*presv = NULL;
 	svrattrl	*psatl = NULL;
 	int		 rc = 0;
-	int		 resv_count = 1;
 	int		 sock = preq->rq_conn;
 	char		 hook_msg[HOOK_MSG_SIZE] = {0};
 	int		 resc_access_perm_save = 0;
@@ -2716,7 +2721,6 @@ req_resvSub(struct batch_request *preq)
 	 */
 
 	if ((presv = resc_resv_alloc()) == NULL) {
-		(void)unlink(namebuf);
 		req_reject(PBSE_SYSTEM, 0, preq);
 		return;
 	}
@@ -2743,12 +2747,14 @@ req_resvSub(struct batch_request *preq)
 	resc_access_perm_save = resc_access_perm; /* save perm */
 	psatl = (svrattrl *)GET_NEXT(preq->rq_ind.rq_queuejob.rq_attr);
 	while (psatl) {
+		int index;
 		/* reservation does not support Shrink-to-fitness */
 		if (!(strcasecmp(psatl->al_name, ATTR_l)) &&
 			(!(strcasecmp(psatl->al_resc, MIN_WALLTIME)) ||
 			!(strcasecmp(psatl->al_resc, MAX_WALLTIME)))) {
 			req_reject(PBSE_NOSTF_RESV, 0, preq);
 			log_event(PBSEVENT_ERROR, PBS_EVENTCLASS_REQUEST, LOG_ERR, "",  msg_nostf_resv);
+			resv_free(presv);
 			return;
 		}
 		/* identify the attribute by name */
@@ -2766,6 +2772,7 @@ req_resvSub(struct batch_request *preq)
 			}
 
 			/* didn`t recognize the name */
+			resv_free(presv);
 			reply_badattr(PBSE_NOATTR, 1, psatl, preq);
 			return;
 		}
@@ -2784,7 +2791,7 @@ req_resvSub(struct batch_request *preq)
 					    ATR_DFLAG_Creat;
 		}
 		if ((pdef->at_flags & resc_access_perm) == 0) {
-			(void)resv_purge(presv);
+			resv_free(presv);
 			reply_badattr(PBSE_ATTRRO, 1, psatl, preq);
 			return;
 		}
@@ -2796,7 +2803,7 @@ req_resvSub(struct batch_request *preq)
 
 
 		if (rc != 0) {
-			(void)resv_purge(presv);
+			resv_free(presv);
 			reply_badattr(rc, 1, psatl, preq);
 			return;
 		}
@@ -2815,7 +2822,7 @@ req_resvSub(struct batch_request *preq)
 			rc = pdef->at_action(&presv->ri_wattr[i],
 				presv, ATR_ACTION_NEW);
 			if (rc) {
-				(void)resv_purge(presv);
+				resv_free(presv);
 				req_reject(rc, i, preq);
 				return;
 			}
@@ -2825,7 +2832,7 @@ req_resvSub(struct batch_request *preq)
 	/*"start", "end","duration", and "wall"; derive and check*/
 
 	if (start_end_dur_wall(presv, RESC_RESV_OBJECT)) {
-		(void)resv_purge(presv);
+		resv_free(presv);
 		req_reject(PBSE_BADTSPEC, 0, preq);
 		return;
 	}
@@ -2835,6 +2842,8 @@ req_resvSub(struct batch_request *preq)
 	 * 'S' instead of 'R'
 	 */
 	if (presv->ri_wattr[RESV_ATR_resv_standing].at_val.at_long) {
+		int resv_count;
+
 		/* Check the recurrence rule. If this fails, an error message
 		 * is sent back to the requestor. Otherwise, check the number
 		 * of occurrences requested by the recurrence rule. If 1 then
@@ -2851,7 +2860,7 @@ req_resvSub(struct batch_request *preq)
 		 * syntax or time problem
 		 */
 		if (rc!=0) {
-			(void)resv_purge(presv);
+			resv_free(presv);
 			req_reject(rc, 0, preq);
 			return;
 		}
@@ -2884,7 +2893,7 @@ req_resvSub(struct batch_request *preq)
 	 */
 
 	if ((rc = set_resc_deflt((void *)presv, RESC_RESV_OBJECT, NULL)) != 0) {
-		(void)resv_purge(presv);
+		resv_free(presv);
 		req_reject(rc, 0, preq);
 		return;
 	}
@@ -2911,7 +2920,7 @@ req_resvSub(struct batch_request *preq)
 				(presv->ri_wattr[(int)RESV_ATR_priority]
 				.at_val.at_long > 1024)) {
 
-				resv_purge(presv);
+				resv_free(presv);
 				req_reject(PBSE_BADATVAL, 0, preq);
 				return;
 			}
@@ -2945,7 +2954,7 @@ req_resvSub(struct batch_request *preq)
 
 		if (act_resv_add_owner(&presv->ri_wattr[(int)RESV_ATR_auth_u],
 			presv, ATR_ACTION_NEW)) {
-			resv_purge(presv);
+			resv_free(presv);
 			req_reject(PBSE_BADATVAL, 0, preq);
 			return;
 		}
@@ -2986,7 +2995,7 @@ req_resvSub(struct batch_request *preq)
 	/* determine values for the "euser" and "egroup" attributes */
 
 	if ((rc = set_objexid((void *)presv, RESC_RESV_OBJECT, presv->ri_wattr))) {
-		resv_purge(presv);
+		resv_free(presv);
 		req_reject(rc, 0, preq);
 		return;
 	}
@@ -3008,7 +3017,7 @@ req_resvSub(struct batch_request *preq)
 #endif
 			ACL_Group) == 0) {
 
-			resv_purge(presv);
+			resv_free(presv);
 			req_reject(PBSE_RESVAUTH_G, 0, preq);
 			return;
 		}
@@ -3024,11 +3033,8 @@ req_resvSub(struct batch_request *preq)
 				presv->ri_wattr[RESV_ATR_euser].at_val.at_str, preq->rq_host);
 		}
 
-		if (acl_check(&server.sv_attr[(int)SRV_ATR_AclResvUsers],
-			buf1,
-			ACL_User) == 0) {
-
-			resv_purge(presv);
+		if (acl_check(&server.sv_attr[(int)SRV_ATR_AclResvUsers], buf1, ACL_User) == 0) {
+			resv_free(presv);
 			req_reject(PBSE_RESVAUTH_U, 0, preq);
 			return;
 		}
@@ -3269,15 +3275,12 @@ get_queue_for_reservation(resc_resv *presv)
 	static	int		lenE = 10;	/*strlen("Execution") + 1*/
 	static	int		lenF = 6;	/*strlen("False") + 1*/
 	static	int		lenT = 5;	/*strlen("True") + 1*/
-	static	char		Execution[] = "Execution";
 	struct batch_request	*newreq;
 	attribute		*pattr;
 	pbs_list_head		*plhed;
 	int			rc = 0;
 	svrattrl		*psatl;
 	struct work_task	*pwt;
-	resource_def		*prdef;
-
 
 	newreq = alloc_br(PBS_BATCH_Manager);
 	if (newreq == NULL) {
@@ -3312,7 +3315,8 @@ get_queue_for_reservation(resc_resv *presv)
 	 */
 
 	j = sizeof(dont_set_in_max) / sizeof(struct dont_set_in_max);
-	for (i=0; i<j; ++i) {
+	for (i = 0; i < j; ++i) {
+		resource_def *prdef;
 		prdef = find_resc_def(svr_resc_def, dont_set_in_max[i].ds_name,
 			svr_resc_size);
 		dont_set_in_max[i].ds_rescp = find_resc_entry(
@@ -3344,8 +3348,9 @@ get_queue_for_reservation(resc_resv *presv)
 		return (PBSE_genBatchReq);
 	}
 
-	if ((psatl = attrlist_create(ATTR_qtype, NULL, lenE)) !=
-		NULL) {
+	if ((psatl = attrlist_create(ATTR_qtype, NULL, lenE)) != NULL) {
+		static char Execution[] = "Execution";
+
 		psatl->al_flags = que_attr_def[QA_ATR_QType].at_flags;
 		strcpy(psatl->al_value, Execution);
 		append_link(plhed, &psatl->al_link, psatl);
@@ -3528,7 +3533,7 @@ act_resv_add_owner(attribute *pattr, void *pobj, int amode)
 	enum batch_op		op;
 	resc_resv		*presv;
 	char			*ps;
-	int			len, i;
+	int			len;
 
 
 	if (amode != ATR_ACTION_NEW)
@@ -3544,7 +3549,9 @@ act_resv_add_owner(attribute *pattr, void *pobj, int amode)
 
 	ap = &presv->ri_wattr[RESV_ATR_auth_u];
 	if (ap->at_flags & ATR_VFLAG_SET) {
-		for (i=0; i < ap->at_val.at_arst->as_usedptr; ++i)
+		int i;
+
+		for (i = 0; i < ap->at_val.at_arst->as_usedptr; ++i)
 			if (!strcmp(ps, ap->at_val.at_arst->as_string[i]))
 				return  (0);	/*resv owner in Authorized_Users*/
 		op = INCR;
